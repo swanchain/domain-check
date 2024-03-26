@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/smtp"
+	"net/url"
 	"os"
 	"time"
 
@@ -67,7 +68,11 @@ func getRecipients(db *sqlx.DB) ([]model.Info, error) {
 }
 
 func checkCertificate(domain string) (time.Time, error) {
-	conn, err := tls.Dial("tcp", domain+":443", nil)
+	u, err := url.Parse(domain)
+	if err != nil {
+		return time.Time{}, err
+	}
+	conn, err := tls.Dial("tcp", u.Hostname()+":443", nil)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -127,14 +132,24 @@ func decryptPassword(encryptedPassword string) (string, error) {
 	return string(plaintext), nil
 }
 
+func formatDuration(d time.Duration) string {
+	d = d.Round(time.Minute)
+	min := int(d.Minutes())
+	h := min / 60
+	min %= 60
+	days := h / 24
+	h %= 24
+
+	return fmt.Sprintf("%d days %d hours %d minutes", days, h, min)
+}
+
 func main() {
 	db, err := database.ConnectToDB()
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	c := cron.New()
-	c.AddFunc("@every 1h", func() {
+	task := func() {
 		log.Println("Scheduler started")
 
 		domains, err := getDomains(db)
@@ -169,7 +184,7 @@ func main() {
 				continue
 			}
 
-			log.Printf("Domain %s expires in %s", domain.Value, time.Until(expireDate).String())
+			log.Printf("Domain %s expires in %s", domain.Value, formatDuration(time.Until(expireDate)))
 
 			if time.Until(expireDate) < 24*time.Hour {
 				decryptedPassword, err := decryptPassword(emailConfig.Pass)
@@ -186,7 +201,12 @@ func main() {
 				}
 			}
 		}
-	})
+	}
+
+	task()
+
+	c := cron.New()
+	c.AddFunc("@every 1h", task)
 	c.Start()
 
 	select {}
