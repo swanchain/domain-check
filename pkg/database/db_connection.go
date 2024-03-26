@@ -10,12 +10,20 @@ import (
 )
 
 func ConnectToDB() (*sqlx.DB, error) {
+	host := os.Getenv("INFO_DB_HOST")
+	port := os.Getenv("INFO_DB_PORT")
+	user := os.Getenv("INFO_DB_USERNAME")
+	password := os.Getenv("INFO_DB_PASSWORD")
+	dbname := os.Getenv("INFO_DB_NAME")
+
+	log.Printf("INFO_DB_HOST: %s", host)
+	log.Printf("INFO_DB_PORT: %s", port)
+	log.Printf("INFO_DB_USERNAME: %s", user)
+	log.Printf("INFO_DB_PASSWORD: %s", password)
+	log.Printf("INFO_DB_NAME: %s", dbname)
+
 	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		os.Getenv("INFO_DB_HOST"),
-		os.Getenv("INFO_DB_PORT"),
-		os.Getenv("INFO_DB_USERNAME"),
-		os.Getenv("INFO_DB_PASSWORD"),
-		os.Getenv("INFO_DB_NAME"),
+		host, port, user, password, dbname,
 	)
 	db, err := sqlx.Open("postgres", connStr)
 	if err != nil {
