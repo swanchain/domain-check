@@ -15,6 +15,7 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/robfig/cron"
 	"github.com/swanchain/domian-check/pkg/database"
+	"github.com/swanchain/domian-check/pkg/model"
 )
 
 type Info struct {
@@ -36,7 +37,7 @@ func getEmailConfig(db *sqlx.DB) (map[string]string, error) {
 
 	emailConfig := make(map[string]string)
 	for rows.Next() {
-		var info Info
+		var info model.Info
 		err = rows.StructScan(&info)
 		if err != nil {
 			return nil, err
@@ -47,8 +48,8 @@ func getEmailConfig(db *sqlx.DB) (map[string]string, error) {
 	return emailConfig, nil
 }
 
-func getDomains(db *sqlx.DB) ([]Info, error) {
-	var domains []Info
+func getDomains(db *sqlx.DB) ([]model.Info, error) {
+	var domains []model.Info
 	err := db.Select(&domains, "SELECT key, value FROM info WHERE is_active = true AND type = 'domain'")
 	if err != nil {
 		return nil, err
@@ -56,8 +57,8 @@ func getDomains(db *sqlx.DB) ([]Info, error) {
 	return domains, nil
 }
 
-func getRecipients(db *sqlx.DB) ([]Info, error) {
-	var recipients []Info
+func getRecipients(db *sqlx.DB) ([]model.Info, error) {
+	var recipients []model.Info
 	err := db.Select(&recipients, "SELECT key, value FROM info WHERE type = 'email'")
 	if err != nil {
 		return nil, err
