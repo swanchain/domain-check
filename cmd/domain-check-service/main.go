@@ -135,17 +135,21 @@ func main() {
 
 	c := cron.New()
 	c.AddFunc("@every 1h", func() {
+		log.Println("Scheduler started")
+
 		domains, err := getDomains(db)
 		if err != nil {
 			log.Println(err)
 			return
 		}
+		log.Printf("Got %d domains", len(domains))
 
 		recipients, err := getRecipients(db)
 		if err != nil {
 			log.Println(err)
 			return
 		}
+		log.Printf("Got %d recipients", len(recipients))
 
 		emailConfigMap, err := getEmailConfig(db)
 		if err != nil {
@@ -165,6 +169,8 @@ func main() {
 				continue
 			}
 
+			log.Printf("Domain %s expires in %s", domain.Value, time.Until(expireDate).String())
+
 			if time.Until(expireDate) < 24*time.Hour {
 				decryptedPassword, err := decryptPassword(emailConfig.Pass)
 				if err != nil {
@@ -176,6 +182,7 @@ func main() {
 
 				for _, recipient := range recipients {
 					sendEmail(emailConfig, recipient.Value, domain.Value, expireDate)
+					log.Printf("Sent email to %s about domain %s", recipient.Value, domain.Value)
 				}
 			}
 		}
