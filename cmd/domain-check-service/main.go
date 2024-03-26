@@ -1,15 +1,20 @@
 package main
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"net/smtp"
+	"os"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/robfig/cron"
+	"github.com/swanchain/domian-check/pkg/database"
 )
 
 type Info struct {
@@ -22,12 +27,23 @@ type EmailConfig struct {
 	Pass string
 }
 
-func getEmailConfig(db *sqlx.DB) (EmailConfig, error) {
-	var emailConfig EmailConfig
-	err := db.Get(&emailConfig, "SELECT key, value FROM info WHERE type = 'email' AND key IN ('admin-email', 'admin-email-psw')")
+func getEmailConfig(db *sqlx.DB) (map[string]string, error) {
+	rows, err := db.Queryx("SELECT key, value FROM info WHERE type = 'email' AND key IN ('admin-email', 'admin-email-psw')")
 	if err != nil {
-		return EmailConfig{}, err
+		return nil, err
 	}
+	defer rows.Close()
+
+	emailConfig := make(map[string]string)
+	for rows.Next() {
+		var info Info
+		err = rows.StructScan(&info)
+		if err != nil {
+			return nil, err
+		}
+		emailConfig[info.Key] = info.Value
+	}
+
 	return emailConfig, nil
 }
 
@@ -82,8 +98,36 @@ func sendEmail(emailConfig EmailConfig, recipient string, domain string, expireD
 	log.Print("sent email to ", to)
 }
 
+func decryptPassword(encryptedPassword string) (string, error) {
+	key := []byte(os.Getenv("DECRYPT_KEY"))
+	ciphertext, _ := base64.URLEncoding.DecodeString(encryptedPassword)
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+
+	nonceSize := gcm.NonceSize()
+	if len(ciphertext) < nonceSize {
+		return "", err
+	}
+
+	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", err
+	}
+
+	return string(plaintext), nil
+}
+
 func main() {
-	db, err := sqlx.Connect("postgres", "user=foo dbname=bar sslmode=disable")
+	db, err := database.ConnectToDB()
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -102,10 +146,15 @@ func main() {
 			return
 		}
 
-		emailConfig, err := getEmailConfig(db)
+		emailConfigMap, err := getEmailConfig(db)
 		if err != nil {
 			log.Println(err)
 			return
+		}
+
+		emailConfig := EmailConfig{
+			User: emailConfigMap["admin-email"],
+			Pass: emailConfigMap["admin-email-psw"],
 		}
 
 		for _, domain := range domains {
@@ -116,6 +165,14 @@ func main() {
 			}
 
 			if time.Until(expireDate) < 24*time.Hour {
+				decryptedPassword, err := decryptPassword(emailConfig.Pass)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
+
+				emailConfig.Pass = decryptedPassword
+
 				for _, recipient := range recipients {
 					sendEmail(emailConfig, recipient.Value, domain.Value, expireDate)
 				}
@@ -124,5 +181,5 @@ func main() {
 	})
 	c.Start()
 
-	select {} // Keep the program running
+	select {}
 }
