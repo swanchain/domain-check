@@ -186,7 +186,7 @@ func main() {
 
 			log.Printf("Domain %s expires in %s", domain.Value, formatDuration(time.Until(expireDate)))
 
-			if time.Until(expireDate) < 24*time.Hour {
+			if time.Until(expireDate) < 48*time.Hour {
 				decryptedPassword, err := decryptPassword(emailConfig.Pass)
 				if err != nil {
 					log.Println(err)
@@ -206,7 +206,7 @@ func main() {
 	task()
 
 	c := cron.New()
-	c.AddFunc("@every 1h", task)
+	c.AddFunc("@daily", task)
 	c.Start()
 
 	select {}
