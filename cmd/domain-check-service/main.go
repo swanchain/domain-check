@@ -15,8 +15,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/robfig/cron"
-	"github.com/swanchain/domian-check/pkg/database"
-	"github.com/swanchain/domian-check/pkg/model"
+	"github.com/swanchain/domain-check/pkg/database"
+	"github.com/swanchain/domain-check/pkg/model"
 )
 
 type Info struct {
