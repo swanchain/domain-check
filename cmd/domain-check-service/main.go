@@ -3,12 +3,8 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/tls"
 	"encoding/base64"
-	"fmt"
 	"log"
-	"net/smtp"
-	"net/url"
 	"os"
 	"time"
 
@@ -17,16 +13,13 @@ import (
 	"github.com/robfig/cron"
 	"github.com/swanchain/domain-check/pkg/database"
 	"github.com/swanchain/domain-check/pkg/model"
+	"github.com/swanchain/domain-check/pkg/sslcert"
+	"github.com/swanchain/domain-check/pkg/wallet"
 )
 
 type Info struct {
 	Key   string `db:"key"`
 	Value string `db:"value"`
-}
-
-type EmailConfig struct {
-	User string
-	Pass string
 }
 
 func getEmailConfig(db *sqlx.DB) (map[string]string, error) {
@@ -49,15 +42,6 @@ func getEmailConfig(db *sqlx.DB) (map[string]string, error) {
 	return emailConfig, nil
 }
 
-func getDomains(db *sqlx.DB) ([]model.Info, error) {
-	var domains []model.Info
-	err := db.Select(&domains, "SELECT key, value FROM info WHERE is_active = true AND type = 'domain'")
-	if err != nil {
-		return nil, err
-	}
-	return domains, nil
-}
-
 func getRecipients(db *sqlx.DB) ([]model.Info, error) {
 	var recipients []model.Info
 	err := db.Select(&recipients, "SELECT key, value FROM info WHERE type = 'email'")
@@ -65,43 +49,6 @@ func getRecipients(db *sqlx.DB) ([]model.Info, error) {
 		return nil, err
 	}
 	return recipients, nil
-}
-
-func checkCertificate(domain string) (time.Time, error) {
-	u, err := url.Parse(domain)
-	if err != nil {
-		return time.Time{}, err
-	}
-	conn, err := tls.Dial("tcp", u.Hostname()+":443", nil)
-	if err != nil {
-		return time.Time{}, err
-	}
-	defer conn.Close()
-
-	cert := conn.ConnectionState().PeerCertificates[0]
-	return cert.NotAfter, nil
-}
-
-func sendEmail(emailConfig EmailConfig, recipient string, domain string, expireDate time.Time) {
-	from := emailConfig.User
-	pass := emailConfig.Pass
-	to := recipient
-
-	msg := "From: " + from + "\n" +
-		"To: " + to + "\n" +
-		"Subject: SSL Certificate Expiration Warning\n\n" +
-		fmt.Sprintf("The SSL certificate for %s will expire on %s.", domain, expireDate.String())
-
-	err := smtp.SendMail("smtp.office365.com:587",
-		smtp.PlainAuth("", from, pass, "smtp.office365.com"),
-		from, []string{to}, []byte(msg))
-
-	if err != nil {
-		log.Printf("smtp error: %s", err)
-		return
-	}
-
-	log.Print("sent email to ", to)
 }
 
 func decryptPassword(encryptedPassword string) (string, error) {
@@ -132,27 +79,110 @@ func decryptPassword(encryptedPassword string) (string, error) {
 	return string(plaintext), nil
 }
 
-func formatDuration(d time.Duration) string {
-	d = d.Round(time.Minute)
-	min := int(d.Minutes())
-	h := min / 60
-	min %= 60
-	days := h / 24
-	h %= 24
-
-	return fmt.Sprintf("%d days %d hours %d minutes", days, h, min)
-}
-
 func main() {
 	db, err := database.ConnectToDB()
 	if err != nil {
 		log.Fatalln(err)
 	}
+	walletTask := func() {
+		log.Println("Wallet Scheduler started")
 
-	task := func() {
-		log.Println("Scheduler started")
+		err := wallet.SetExplorerAndRpcVars(db)
+		if err != nil {
+			log.Println(err)
+			return
+		}
 
-		domains, err := getDomains(db)
+		l1Wallets, err := wallet.GetL1Wallet(db)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		l2Wallets, err := wallet.GetL2Wallet(db)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		emailConfigMap, err := getEmailConfig(db)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		emailConfig := wallet.EmailConfig{
+			User: emailConfigMap["admin-email"],
+			Pass: emailConfigMap["admin-email-psw"],
+		}
+
+		recipients, err := getRecipients(db)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		for _, l1Wallet := range l1Wallets {
+			balance, err := wallet.CheckSepoliaBalance(l1Wallet.Value)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			err = wallet.UpdateL1Wallet(db, l1Wallet, balance)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			decryptedPassword, err := decryptPassword(emailConfig.Pass)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			emailConfig.Pass = decryptedPassword
+
+			for _, recipient := range recipients {
+				wallet.SendWalletBalanceEmail(emailConfig, recipient.Value, l1Wallet.Value, balance, balanceChange)
+				log.Printf("Sent email to %s about wallet %s", recipient.Value, l1Wallet.Value)
+			}
+		}
+
+		for _, l2Wallet := range l2Wallets {
+			balance, err := wallet.CheckSwanBalance(l2Wallet.Value)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			err = wallet.UpdateL2Wallet(db, l2Wallet, balance)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			decryptedPassword, err := decryptPassword(emailConfig.Pass)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			emailConfig.Pass = decryptedPassword
+
+			for _, recipient := range recipients {
+				wallet.SendWalletBalanceEmail(emailConfig, recipient.Value, l2Wallet.Value, balance, balanceChange)
+				log.Printf("Sent email to %s about wallet %s", recipient.Value, l2Wallet.Value)
+			}
+		}
+
+		log.Println("Wallet Scheduler finished")
+	}
+
+	SSLtask := func() {
+		log.Println("SSL Scheduler started")
+
+		domains, err := sslcert.GetDomains(db)
 		if err != nil {
 			log.Println(err)
 			return
@@ -172,19 +202,19 @@ func main() {
 			return
 		}
 
-		emailConfig := EmailConfig{
+		emailConfig := sslcert.EmailConfig{
 			User: emailConfigMap["admin-email"],
 			Pass: emailConfigMap["admin-email-psw"],
 		}
 
 		for _, domain := range domains {
-			expireDate, err := checkCertificate(domain.Value)
+			expireDate, err := sslcert.CheckCertificate(domain.Value)
 			if err != nil {
 				log.Println(err)
 				continue
 			}
 
-			log.Printf("Domain %s expires in %s", domain.Value, formatDuration(time.Until(expireDate)))
+			log.Printf("Domain %s expires in %s", domain.Value, sslcert.FormatDuration(time.Until(expireDate)))
 
 			if time.Until(expireDate) < 48*time.Hour {
 				decryptedPassword, err := decryptPassword(emailConfig.Pass)
@@ -196,17 +226,19 @@ func main() {
 				emailConfig.Pass = decryptedPassword
 
 				for _, recipient := range recipients {
-					sendEmail(emailConfig, recipient.Value, domain.Value, expireDate)
+					sslcert.SendEmail(emailConfig, recipient.Value, domain.Value, expireDate)
 					log.Printf("Sent email to %s about domain %s", recipient.Value, domain.Value)
 				}
 			}
 		}
 	}
 
-	task()
+	SSLtask()
+	walletTask()
 
 	c := cron.New()
-	c.AddFunc("@daily", task)
+	c.AddFunc("@daily", SSLtask)
+	c.AddFunc("30 9 * * *", walletTask)
 	c.Start()
 
 	select {}
