@@ -39,6 +39,14 @@ type EmailConfig struct {
 	Pass string
 }
 
+type TeamsMessage struct {
+	Type    string `json:"@type"`
+	Context string `json:"@context"`
+	Summary string `json:"summary"`
+	Title   string `json:"title"`
+	Text    string `json:"text"`
+}
+
 func SetExplorerAndRpcVars(db *sqlx.DB) error {
 	rows, err := db.Queryx("SELECT key, value FROM info WHERE key IN ('sepolia-rpc', 'saturn-rpc', 'saturn-block-explorer', 'sepolia-block-explorer')")
 	if err != nil {
@@ -164,7 +172,7 @@ func UpdateL2Wallet(db *sqlx.DB, wallet model.Config, newBalance float64) error 
 	return err
 }
 
-func SendWalletBalanceEmail(emailConfig EmailConfig, recipient string, walletAddress string, newBalance float64, balanceChange float64) {
+func SendWalletBalanceEmail(emailConfig EmailConfig, recipient string, message string) {
 	from := emailConfig.User
 	pass := emailConfig.Pass
 	to := recipient
@@ -172,7 +180,7 @@ func SendWalletBalanceEmail(emailConfig EmailConfig, recipient string, walletAdd
 	msg := "From: " + from + "\n" +
 		"To: " + to + "\n" +
 		"Subject: Wallet Balance Update\n\n" +
-		fmt.Sprintf("The balance for wallet %s is now %f. The change in balance is %f.", walletAddress, newBalance, balanceChange)
+		message
 
 	err := smtp.SendMail("smtp.office365.com:587",
 		smtp.PlainAuth("", from, pass, "smtp.office365.com"),
@@ -184,4 +192,32 @@ func SendWalletBalanceEmail(emailConfig EmailConfig, recipient string, walletAdd
 	}
 
 	log.Print("sent email to ", to)
+}
+
+func SendTeamsNotification(webhookURL string, message string) {
+	msg := TeamsMessage{
+		Type:    "MessageCard",
+		Context: "http://schema.org/extensions",
+		Summary: "Wallet Balance Update",
+		Title:   "Wallet Balance Update",
+		Text:    message,
+	}
+
+	msgBytes, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("json marshal error: %s", err)
+		return
+	}
+
+	resp, err := http.Post(webhookURL, "application/json", bytes.NewBuffer(msgBytes))
+	if err != nil {
+		log.Printf("http post error: %s", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		log.Printf("teams webhook error: %s", bodyBytes)
+	}
 }

@@ -4,8 +4,10 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -86,7 +88,7 @@ func main() {
 	}
 	walletTask := func() {
 		log.Println("Wallet Scheduler started")
-
+		var messages []string
 		err := wallet.SetExplorerAndRpcVars(db)
 		if err != nil {
 			log.Println(err)
@@ -122,6 +124,12 @@ func main() {
 			return
 		}
 
+		teamsWebhookURL, err := getTeamsWebhookURL(db)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
 		for _, l1Wallet := range l1Wallets {
 			balance, err := wallet.CheckSepoliaBalance(l1Wallet.Value)
 			if err != nil {
@@ -135,18 +143,8 @@ func main() {
 				continue
 			}
 
-			decryptedPassword, err := decryptPassword(emailConfig.Pass)
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-
-			emailConfig.Pass = decryptedPassword
-
-			for _, recipient := range recipients {
-				wallet.SendWalletBalanceEmail(emailConfig, recipient.Value, l1Wallet.Value, balance, balanceChange)
-				log.Printf("Sent email to %s about wallet %s", recipient.Value, l1Wallet.Value)
-			}
+			message := fmt.Sprintf("The balance for wallet %s is now %f.", l1Wallet.Value, balance)
+			messages = append(messages, message)
 		}
 
 		for _, l2Wallet := range l2Wallets {
@@ -162,19 +160,22 @@ func main() {
 				continue
 			}
 
-			decryptedPassword, err := decryptPassword(emailConfig.Pass)
-			if err != nil {
-				log.Println(err)
-				continue
-			}
-
-			emailConfig.Pass = decryptedPassword
-
-			for _, recipient := range recipients {
-				wallet.SendWalletBalanceEmail(emailConfig, recipient.Value, l2Wallet.Value, balance, balanceChange)
-				log.Printf("Sent email to %s about wallet %s", recipient.Value, l2Wallet.Value)
-			}
+			message := fmt.Sprintf("The balance for wallet %s is now %f.", l2Wallet.Value, balance)
+			messages = append(messages, message)
 		}
+
+		emailBody := strings.Join(messages, "\n")
+		decryptedPassword, err := decryptPassword(emailConfig.Pass)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		emailConfig.Pass = decryptedPassword
+		for _, recipient := range recipients {
+			wallet.SendWalletBalanceEmail(emailConfig, recipient.Value, emailBody)
+			log.Printf("Sent email to %s", recipient.Value)
+		}
+		wallet.SendTeamsNotification(teamsWebhookURL, emailBody)
 
 		log.Println("Wallet Scheduler finished")
 	}
@@ -207,6 +208,14 @@ func main() {
 			Pass: emailConfigMap["admin-email-psw"],
 		}
 
+		teamsWebhookURL, err := getTeamsWebhookURL(db)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+
+		var messages []string
+
 		for _, domain := range domains {
 			expireDate, err := sslcert.CheckCertificate(domain.Value)
 			if err != nil {
@@ -217,20 +226,25 @@ func main() {
 			log.Printf("Domain %s expires in %s", domain.Value, sslcert.FormatDuration(time.Until(expireDate)))
 
 			if time.Until(expireDate) < 48*time.Hour {
-				decryptedPassword, err := decryptPassword(emailConfig.Pass)
-				if err != nil {
-					log.Println(err)
-					continue
-				}
-
-				emailConfig.Pass = decryptedPassword
-
-				for _, recipient := range recipients {
-					sslcert.SendEmail(emailConfig, recipient.Value, domain.Value, expireDate)
-					log.Printf("Sent email to %s about domain %s", recipient.Value, domain.Value)
-				}
+				message := fmt.Sprintf("The SSL certificate for %s will expire on %s.", domain.Value, expireDate.String())
+				messages = append(messages, message)
 			}
 		}
+
+		emailBody := strings.Join(messages, "\n")
+		decryptedPassword, err := decryptPassword(emailConfig.Pass)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		emailConfig.Pass = decryptedPassword
+		for _, recipient := range recipients {
+			sslcert.SendEmail(emailConfig, recipient.Value, emailBody)
+			log.Printf("Sent email to %s", recipient.Value)
+		}
+		sslcert.SendTeamsNotification(teamsWebhookURL, emailBody)
+
+		log.Println("SSL Scheduler finished")
 	}
 
 	SSLtask()
