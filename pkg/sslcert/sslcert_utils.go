@@ -22,7 +22,7 @@ type EmailConfig struct {
 	Pass string
 }
 
-func getDomains(db *sqlx.DB) ([]model.Info, error) {
+func GetDomains(db *sqlx.DB) ([]model.Info, error) {
 	var domains []model.Info
 	err := db.Select(&domains, "SELECT key, value FROM info WHERE is_active = true AND type = 'domain'")
 	if err != nil {
@@ -31,7 +31,7 @@ func getDomains(db *sqlx.DB) ([]model.Info, error) {
 	return domains, nil
 }
 
-func checkCertificate(domain string) (time.Time, error) {
+func CheckCertificate(domain string) (time.Time, error) {
 	u, err := url.Parse(domain)
 	if err != nil {
 		return time.Time{}, err
@@ -46,7 +46,7 @@ func checkCertificate(domain string) (time.Time, error) {
 	return cert.NotAfter, nil
 }
 
-func sendEmail(emailConfig EmailConfig, recipient string, domain string, expireDate time.Time) {
+func SendEmail(emailConfig EmailConfig, recipient string, domain string, expireDate time.Time) {
 	from := emailConfig.User
 	pass := emailConfig.Pass
 	to := recipient
@@ -68,7 +68,7 @@ func sendEmail(emailConfig EmailConfig, recipient string, domain string, expireD
 	log.Print("sent email to ", to)
 }
 
-func formatDuration(d time.Duration) string {
+func FormatDuration(d time.Duration) string {
 	d = d.Round(time.Minute)
 	min := int(d.Minutes())
 	h := min / 60
