@@ -37,7 +37,7 @@ func ConnectToDB() (*sqlx.DB, error) {
 		return nil, err
 	}
 
-	_, err = db.Exec("SET search_path TO swan_ssl_certificate")
+	_, err = db.Exec("SET search_path TO swan_tool")
 	if err != nil {
 		log.Printf("Failed to set search_path: %v", err)
 		return nil, err
