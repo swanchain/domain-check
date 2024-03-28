@@ -83,7 +83,7 @@ func decryptPassword(encryptedPassword string) (string, error) {
 
 func getTeamsWebhookURL(db *sqlx.DB) (string, error) {
 	var teamsWebhookURL string
-	err := db.Get(&teamsWebhookURL, "SELECT value FROM info WHERE key = 'teams-webhook-url'")
+	err := db.Get(&teamsWebhookURL, "SELECT value FROM info WHERE key = 'teams-webhook'")
 	if err != nil {
 		return "", err
 	}
