@@ -6,5 +6,5 @@ type SwanChainData struct {
 	Balance       string `db:"balance"`
 	BalanceChange string `db:"balance_change"`
 	NetworkEnv    string `db:"network_env"`
-	UpdatedAt     string `db:"updated_at"`
+	UpdatedAt     string `db:"update_at"`
 }
