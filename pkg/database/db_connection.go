@@ -16,11 +16,11 @@ func ConnectToDB() (*sqlx.DB, error) {
 	password := os.Getenv("INFO_DB_PASSWORD")
 	dbname := os.Getenv("INFO_DB_NAME")
 
-	log.Printf("INFO_DB_HOST: %s", host)
-	log.Printf("INFO_DB_PORT: %s", port)
-	log.Printf("INFO_DB_USERNAME: %s", user)
-	log.Printf("INFO_DB_PASSWORD: %s", password)
-	log.Printf("INFO_DB_NAME: %s", dbname)
+	//log.Printf("INFO_DB_HOST: %s", host)
+	//log.Printf("INFO_DB_PORT: %s", port)
+	//log.Printf("INFO_DB_USERNAME: %s", user)
+	//log.Printf("INFO_DB_PASSWORD: %s", password)
+	//log.Printf("INFO_DB_NAME: %s", dbname)
 
 	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		host, port, user, password, dbname,
