@@ -2,12 +2,16 @@ package wallet
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
+	"math/big"
 	"net/http"
 	"net/smtp"
+	"strconv"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -29,9 +33,9 @@ type rpcRequest struct {
 }
 
 type rpcResponse struct {
-	Jsonrpc string  `json:"jsonrpc"`
-	ID      int     `json:"id"`
-	Result  float64 `json:"result"`
+	Jsonrpc string `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Result  string `json:"result"`
 }
 
 type EmailConfig struct {
@@ -50,6 +54,7 @@ type TeamsMessage struct {
 func SetExplorerAndRpcVars(db *sqlx.DB) error {
 	rows, err := db.Queryx("SELECT key, value FROM info WHERE key IN ('sepolia-rpc', 'saturn-rpc', 'saturn-block-explorer', 'sepolia-block-explorer')")
 	if err != nil {
+		log.Printf("Error executing query in SetExplorerAndRpcVars: %s", err)
 		return err
 	}
 	defer rows.Close()
@@ -57,6 +62,7 @@ func SetExplorerAndRpcVars(db *sqlx.DB) error {
 	for rows.Next() {
 		var config model.Config
 		if err := rows.StructScan(&config); err != nil {
+			log.Printf("Error scanning row in SetExplorerAndRpcVars: %s", err)
 			return err
 		}
 
@@ -73,35 +79,39 @@ func SetExplorerAndRpcVars(db *sqlx.DB) error {
 	}
 
 	if err := rows.Err(); err != nil {
+		log.Printf("Error after iterating rows in SetExplorerAndRpcVars: %s", err)
 		return err
 	}
 
 	return nil
 }
-
 func GetL1Wallet(db *sqlx.DB) ([]model.Config, error) {
 	var wallets []model.Config
-	err := db.Select(&wallets, "SELECT * FROM info WHERE key LIKE 'l1%' AND type = 'wallet-address'")
+	err := db.Select(&wallets, "SELECT * FROM info WHERE key ILIKE 'l1%' AND type = 'wallet-address'")
 	if err != nil {
+		log.Printf("Error retrieving L1 wallets: %s", err)
 		return nil, err
 	}
+	log.Printf("Number of L1 wallets retrieved: %d", len(wallets))
 	return wallets, nil
 }
 
 func GetL2Wallet(db *sqlx.DB) ([]model.Config, error) {
 	var wallets []model.Config
-	err := db.Select(&wallets, "SELECT * FROM info WHERE key LIKE 'l2%' AND type = 'wallet-address'")
+	err := db.Select(&wallets, "SELECT * FROM info WHERE key ILIKE 'l2%' AND type = 'wallet-address'")
 	if err != nil {
+		log.Printf("Error retrieving L2 wallets: %s", err)
 		return nil, err
 	}
+	log.Printf("Number of L2 wallets retrieved: %d", len(wallets))
 	return wallets, nil
 }
 
 func CheckBalance(rpcURL, walletAddress string) (float64, error) {
 	reqBody := &rpcRequest{
 		Jsonrpc: "2.0",
-		Method:  "getbalance",
-		Params:  []interface{}{walletAddress},
+		Method:  "eth_getBalance",
+		Params:  []interface{}{walletAddress, "latest"},
 		ID:      1,
 	}
 	reqBytes, err := json.Marshal(reqBody)
@@ -125,51 +135,88 @@ func CheckBalance(rpcURL, walletAddress string) (float64, error) {
 		return 0, err
 	}
 
-	return rpcResp.Result, nil
+	// Convert the balance from Wei (the smallest unit of Ether) to Ether
+	balanceInWei := new(big.Int)
+	balanceInWei.SetString(rpcResp.Result[2:], 16) // The balance is returned as a hexadecimal string
+	balanceInEth := new(big.Float).Quo(new(big.Float).SetInt(balanceInWei), big.NewFloat(math.Pow10(18)))
+
+	// Convert the balance to a float64
+	balance, _ := balanceInEth.Float64()
+
+	return balance, nil
 }
 
 func CheckSepoliaBalance(walletAddress string) (float64, error) {
-	return CheckBalance(sepolia_rpc, walletAddress)
+	balance, err := CheckBalance(sepolia_rpc, walletAddress)
+	if err != nil {
+		log.Printf("Error checking Sepolia balance for wallet %s: %s", walletAddress, err)
+		return 0, err
+	}
+	log.Printf("Sepolia balance for wallet %s: %f", walletAddress, balance)
+	return balance, nil
 }
 
 func CheckSwanBalance(walletAddress string) (float64, error) {
-	return CheckBalance(swan_rpc, walletAddress)
+	balance, err := CheckBalance(swan_rpc, walletAddress)
+	if err != nil {
+		log.Printf("Error checking Swan balance for wallet %s: %s", walletAddress, err)
+		return 0, err
+	}
+	log.Printf("Swan balance for wallet %s: %f", walletAddress, balance)
+	return balance, nil
+}
+
+func UpsertWallet(db *sqlx.DB, wallet model.Config, newBalance float64, networkEnv string) error {
+	var currentBalanceStr string
+	err := db.Get(&currentBalanceStr, "SELECT balance FROM swan_chain_data WHERE wallet_address = $1 AND network_env = $2", wallet.Value, networkEnv)
+
+	if err != nil && err != sql.ErrNoRows {
+		log.Printf("Error retrieving wallet data: %s", err)
+		return err
+	}
+
+	currentBalance, _ := strconv.ParseFloat(currentBalanceStr, 64)
+	balanceChange := newBalance - currentBalance
+
+	updateQuery := `
+		UPDATE swan_chain_data
+		SET balance = $1, balance_change = $2, update_at = $3
+		WHERE wallet_address = $4 AND network_env = $5
+	`
+	result, err := db.Exec(updateQuery, fmt.Sprintf("%f", newBalance), fmt.Sprintf("%f", balanceChange), time.Now().Format(time.RFC3339), wallet.Value, networkEnv)
+
+	if err != nil {
+		log.Printf("Error updating wallet data: %s", err)
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Error getting rows affected: %s", err)
+		return err
+	}
+
+	if rowsAffected == 0 {
+		insertQuery := `
+			INSERT INTO swan_chain_data (wallet_address, balance, balance_change, network_env, update_at)
+			VALUES ($1, $2, $3, $4, $5)
+		`
+		_, err = db.Exec(insertQuery, wallet.Value, fmt.Sprintf("%f", newBalance), fmt.Sprintf("%f", balanceChange), networkEnv, time.Now().Format(time.RFC3339))
+		if err != nil {
+			log.Printf("Error inserting wallet data: %s", err)
+			return err
+		}
+	}
+
+	return nil
 }
 
 func UpdateL1Wallet(db *sqlx.DB, wallet model.Config, newBalance float64) error {
-	var currentBalance float64
-	err := db.Get(&currentBalance, "SELECT balance FROM swan_chain_data WHERE wallet_address = ?", wallet.Value)
-	if err != nil {
-		return err
-	}
-
-	balanceChange := newBalance - currentBalance
-
-	query := `
-		UPDATE swan_chain_data
-		SET balance = ?, balance_change = ?, explorer = ?, network_env = ?, updated_at = ?
-		WHERE wallet_address = ?
-	`
-	_, err = db.Exec(query, fmt.Sprintf("%f", newBalance), fmt.Sprintf("%f", balanceChange), sepolia_block_explorer, "sepolia", time.Now().Format(time.RFC3339), wallet.Value)
-	return err
+	return UpsertWallet(db, wallet, newBalance, "sepolia")
 }
 
 func UpdateL2Wallet(db *sqlx.DB, wallet model.Config, newBalance float64) error {
-	var currentBalance float64
-	err := db.Get(&currentBalance, "SELECT balance FROM swan_chain_data WHERE wallet_address = ?", wallet.Value)
-	if err != nil {
-		return err
-	}
-
-	balanceChange := newBalance - currentBalance
-
-	query := `
-		UPDATE swan_chain_data
-		SET balance = ?, balance_change = ?, explorer = ?, network_env = ?, updated_at = ?
-		WHERE wallet_address = ?
-	`
-	_, err = db.Exec(query, fmt.Sprintf("%f", newBalance), fmt.Sprintf("%f", balanceChange), swan_block_explorer, "swan", time.Now().Format(time.RFC3339), wallet.Value)
-	return err
+	return UpsertWallet(db, wallet, newBalance, "swan")
 }
 
 func SendWalletBalanceEmail(emailConfig EmailConfig, recipient string, message string) {
