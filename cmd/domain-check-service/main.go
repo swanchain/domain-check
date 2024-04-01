@@ -1,9 +1,6 @@
 package main
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -24,26 +21,27 @@ type Info struct {
 	Value string `db:"value"`
 }
 
-func getEmailConfig(db *sqlx.DB) (map[string]string, error) {
-	rows, err := db.Queryx("SELECT key, value FROM info WHERE type = 'email' AND key IN ('admin-email', 'admin-email-psw')")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	emailConfig := make(map[string]string)
-	for rows.Next() {
-		var info model.Info
-		err = rows.StructScan(&info)
+/*
+	func getEmailConfig(db *sqlx.DB) (map[string]string, error) {
+		rows, err := db.Queryx("SELECT key, value FROM info WHERE type = 'email' AND key IN ('admin-email', 'admin-email-psw')")
 		if err != nil {
 			return nil, err
 		}
-		emailConfig[info.Key] = info.Value
+		defer rows.Close()
+
+		emailConfig := make(map[string]string)
+		for rows.Next() {
+			var info model.Info
+			err = rows.StructScan(&info)
+			if err != nil {
+				return nil, err
+			}
+			emailConfig[info.Key] = info.Value
+		}
+
+		return emailConfig, nil
 	}
-
-	return emailConfig, nil
-}
-
+*/
 func getRecipients(db *sqlx.DB) ([]model.Info, error) {
 	var recipients []model.Info
 	err := db.Select(&recipients, "SELECT key, value FROM info WHERE type = 'email'")
@@ -53,34 +51,35 @@ func getRecipients(db *sqlx.DB) ([]model.Info, error) {
 	return recipients, nil
 }
 
-func decryptPassword(encryptedPassword string) (string, error) {
-	key := []byte(os.Getenv("DECRYPT_KEY"))
-	ciphertext, _ := base64.URLEncoding.DecodeString(encryptedPassword)
+/*
+	func decryptPassword(encryptedPassword string) (string, error) {
+		key := []byte(os.Getenv("DECRYPT_KEY"))
+		ciphertext, _ := base64.URLEncoding.DecodeString(encryptedPassword)
 
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return "", err
+		block, err := aes.NewCipher(key)
+		if err != nil {
+			return "", err
+		}
+
+		gcm, err := cipher.NewGCM(block)
+		if err != nil {
+			return "", err
+		}
+
+		nonceSize := gcm.NonceSize()
+		if len(ciphertext) < nonceSize {
+			return "", err
+		}
+
+		nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
+		plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
+		if err != nil {
+			return "", err
+		}
+
+		return string(plaintext), nil
 	}
-
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return "", err
-	}
-
-	nonceSize := gcm.NonceSize()
-	if len(ciphertext) < nonceSize {
-		return "", err
-	}
-
-	nonce, ciphertext := ciphertext[:nonceSize], ciphertext[nonceSize:]
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, nil)
-	if err != nil {
-		return "", err
-	}
-
-	return string(plaintext), nil
-}
-
+*/
 func getTeamsWebhookURL(db *sqlx.DB) (string, error) {
 	var teamsWebhookURL string
 	err := db.Get(&teamsWebhookURL, "SELECT value FROM info WHERE key = 'teams-webhook'")
@@ -115,24 +114,24 @@ func main() {
 			log.Println(err)
 			return
 		}
-
-		emailConfigMap, err := getEmailConfig(db)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
-		emailConfig := wallet.EmailConfig{
-			User: emailConfigMap["admin-email"],
-			Pass: emailConfigMap["admin-email-psw"],
-		}
-
 		/*
+			emailConfigMap, err := getEmailConfig(db)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
 			emailConfig := wallet.EmailConfig{
-				User: os.Getenv("EMAIL_USER"),
-				Pass: os.Getenv("EMAIL_PASS"),
+				User: emailConfigMap["admin-email"],
+				Pass: emailConfigMap["admin-email-psw"],
 			}
 		*/
+
+		emailConfig := wallet.EmailConfig{
+			User: os.Getenv("ADMIN_EMAIL"),
+			Pass: os.Getenv("ADMIN_PW"),
+		}
+
 		recipients, err := getRecipients(db)
 		if err != nil {
 			log.Println(err)
@@ -178,12 +177,12 @@ func main() {
 			messages = append(messages, message)
 		}
 		emailBody := strings.Join(messages, "\n")
-		decryptedPassword, err := decryptPassword(emailConfig.Pass)
+		//decryptedPassword, err := decryptPassword(emailConfig.Pass)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		emailConfig.Pass = decryptedPassword
+		//emailConfig.Pass = decryptedPassword
 		for _, recipient := range recipients {
 			wallet.SendWalletBalanceEmail(emailConfig, recipient.Value, emailBody)
 			log.Printf("Sent email to %s", recipient.Value)
@@ -209,23 +208,23 @@ func main() {
 			return
 		}
 		log.Printf("Got %d recipients", len(recipients))
-
-		emailConfigMap, err := getEmailConfig(db)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
-		emailConfig := sslcert.EmailConfig{
-			User: emailConfigMap["admin-email"],
-			Pass: emailConfigMap["admin-email-psw"],
-		}
 		/*
+			emailConfigMap, err := getEmailConfig(db)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+
 			emailConfig := sslcert.EmailConfig{
-				User: os.Getenv("EMAIL_USER"),
-				Pass: os.Getenv("EMAIL_PASS"),
+				User: emailConfigMap["admin-email"],
+				Pass: emailConfigMap["admin-email-psw"],
 			}
 		*/
+		emailConfig := sslcert.EmailConfig{
+			User: os.Getenv("ADMIN_EMAIL"),
+			Pass: os.Getenv("ADMIN_PW"),
+		}
+
 		teamsWebhookURL, err := getTeamsWebhookURL(db)
 		if err != nil {
 			log.Println(err)
@@ -258,7 +257,7 @@ func main() {
 			sslcert.SendTeamsNotification(teamsWebhookURL, teamsMessage, true)
 		}
 
-		decryptedPassword, err := decryptPassword(emailConfig.Pass)
+		//decryptedPassword, err := decryptPassword(emailConfig.Pass)
 		if err != nil {
 			log.Println(err)
 			return
@@ -271,7 +270,7 @@ func main() {
 				log.Printf("Sent email to %s", recipient.Value)
 			}
 		}
-		emailConfig.Pass = decryptedPassword
+		//emailConfig.Pass = decryptedPassword
 		log.Println("SSL Scheduler finished")
 	}
 
