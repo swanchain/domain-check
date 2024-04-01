@@ -1,9 +1,6 @@
 package main
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
-	"encoding/base64"
 	"fmt"
 	"log"
 	"os"
@@ -24,6 +21,7 @@ type Info struct {
 	Value string `db:"value"`
 }
 
+/*
 func getEmailConfig(db *sqlx.DB) (map[string]string, error) {
 	rows, err := db.Queryx("SELECT key, value FROM info WHERE type = 'email' AND key IN ('admin-email', 'admin-email-psw')")
 	if err != nil {
@@ -43,6 +41,7 @@ func getEmailConfig(db *sqlx.DB) (map[string]string, error) {
 
 	return emailConfig, nil
 }
+*/
 
 func getRecipients(db *sqlx.DB) ([]model.Info, error) {
 	var recipients []model.Info
@@ -53,6 +52,7 @@ func getRecipients(db *sqlx.DB) ([]model.Info, error) {
 	return recipients, nil
 }
 
+/*
 func decryptPassword(encryptedPassword string) (string, error) {
 	key := []byte(os.Getenv("DECRYPT_KEY"))
 	ciphertext, _ := base64.URLEncoding.DecodeString(encryptedPassword)
@@ -80,6 +80,7 @@ func decryptPassword(encryptedPassword string) (string, error) {
 
 	return string(plaintext), nil
 }
+*/
 
 func getTeamsWebhookURL(db *sqlx.DB) (string, error) {
 	var teamsWebhookURL string
@@ -115,18 +116,22 @@ func main() {
 			log.Println(err)
 			return
 		}
+		/*
+			emailConfigMap, err := getEmailConfig(db)
+			if err != nil {
+				log.Println(err)
+				return
+			}
 
-		emailConfigMap, err := getEmailConfig(db)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
+			emailConfig := wallet.EmailConfig{
+				User: emailConfigMap["admin-email"],
+				Pass: emailConfigMap["admin-email-psw"],
+			}
+		*/
 		emailConfig := wallet.EmailConfig{
-			User: emailConfigMap["admin-email"],
-			Pass: emailConfigMap["admin-email-psw"],
+			User: os.Getenv("EMAIL_USER"),
+			Pass: os.Getenv("EMAIL_PASS"),
 		}
-
 		recipients, err := getRecipients(db)
 		if err != nil {
 			log.Println(err)
@@ -174,12 +179,12 @@ func main() {
 		}
 
 		emailBody := strings.Join(messages, "\n")
-		decryptedPassword, err := decryptPassword(emailConfig.Pass)
+		//decryptedPassword, err := decryptPassword(emailConfig.Pass)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		emailConfig.Pass = decryptedPassword
+		//emailConfig.Pass = decryptedPassword
 		for _, recipient := range recipients {
 			wallet.SendWalletBalanceEmail(emailConfig, recipient.Value, emailBody)
 			log.Printf("Sent email to %s", recipient.Value)
@@ -205,18 +210,22 @@ func main() {
 			return
 		}
 		log.Printf("Got %d recipients", len(recipients))
+		/*
+			emailConfigMap, err := getEmailConfig(db)
+			if err != nil {
+				log.Println(err)
+				return
+			}
 
-		emailConfigMap, err := getEmailConfig(db)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
+			emailConfig := sslcert.EmailConfig{
+				User: emailConfigMap["admin-email"],
+				Pass: emailConfigMap["admin-email-psw"],
+			}
+		*/
 		emailConfig := sslcert.EmailConfig{
-			User: emailConfigMap["admin-email"],
-			Pass: emailConfigMap["admin-email-psw"],
+			User: os.Getenv("EMAIL_USER"),
+			Pass: os.Getenv("EMAIL_PASS"),
 		}
-
 		teamsWebhookURL, err := getTeamsWebhookURL(db)
 		if err != nil {
 			log.Println(err)
@@ -224,6 +233,7 @@ func main() {
 		}
 
 		var messages []string
+		var emailMessages []string
 
 		for _, domain := range domains {
 			expireDate, err := sslcert.CheckCertificate(domain.Value)
@@ -232,27 +242,33 @@ func main() {
 				continue
 			}
 
-			log.Printf("Domain %s expires in %s", domain.Value, sslcert.FormatDuration(time.Until(expireDate)))
+			expireMessage := fmt.Sprintf("Domain %s expires in %s", domain.Value, sslcert.FormatDuration(time.Until(expireDate)))
+			log.Println(expireMessage)
+			messages = append(messages, expireMessage)
 
 			if time.Until(expireDate) < 48*time.Hour {
-				message := fmt.Sprintf("The SSL certificate for %s will expire on %s.", domain.Value, expireDate.String())
-				messages = append(messages, message)
+				emailMessage := fmt.Sprintf("The SSL certificate for %s will expire on %s.", domain.Value, expireDate.String())
+				emailMessages = append(emailMessages, emailMessage)
 			}
 		}
 
-		emailBody := strings.Join(messages, "\n")
-		decryptedPassword, err := decryptPassword(emailConfig.Pass)
+		teamsMessage := strings.Join(messages, "\n")
+		sslcert.SendTeamsNotification(teamsWebhookURL, teamsMessage)
+
+		//decryptedPassword, err := decryptPassword(emailConfig.Pass)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		emailConfig.Pass = decryptedPassword
-		for _, recipient := range recipients {
-			sslcert.SendEmail(emailConfig, recipient.Value, emailBody)
-			log.Printf("Sent email to %s", recipient.Value)
-		}
-		sslcert.SendTeamsNotification(teamsWebhookURL, emailBody)
 
+		if len(emailMessages) > 0 {
+			emailBody := strings.Join(emailMessages, "\n")
+			for _, recipient := range recipients {
+				sslcert.SendEmail(emailConfig, recipient.Value, emailBody)
+				log.Printf("Sent email to %s", recipient.Value)
+			}
+		}
+		//emailConfig.Pass = decryptedPassword
 		log.Println("SSL Scheduler finished")
 	}
 
@@ -260,7 +276,7 @@ func main() {
 	walletTask()
 
 	c := cron.New()
-	c.AddFunc("@daily", SSLtask)
+	c.AddFunc("30 9 * * *", SSLtask)
 	c.AddFunc("30 9 * * *", walletTask)
 	c.Start()
 
