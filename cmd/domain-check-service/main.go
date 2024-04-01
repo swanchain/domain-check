@@ -157,8 +157,7 @@ func main() {
 				log.Println(err)
 				continue
 			}
-
-			message := fmt.Sprintf("The balance for wallet %s is now %f.", l1Wallet.Value, balance)
+			message := fmt.Sprintf("The balance for wallet %s is now %f.  ", l1Wallet.Value, balance)
 			messages = append(messages, message)
 		}
 
@@ -175,10 +174,9 @@ func main() {
 				continue
 			}
 
-			message := fmt.Sprintf("The balance for wallet %s is now %f.", l2Wallet.Value, balance)
+			message := fmt.Sprintf("The balance for wallet %s is now %f.  ", l2Wallet.Value, balance)
 			messages = append(messages, message)
 		}
-
 		emailBody := strings.Join(messages, "\n")
 		decryptedPassword, err := decryptPassword(emailConfig.Pass)
 		if err != nil {
@@ -190,7 +188,7 @@ func main() {
 			wallet.SendWalletBalanceEmail(emailConfig, recipient.Value, emailBody)
 			log.Printf("Sent email to %s", recipient.Value)
 		}
-		wallet.SendTeamsNotification(teamsWebhookURL, emailBody)
+		wallet.SendTeamsNotification(teamsWebhookURL, emailBody, true)
 
 		log.Println("Wallet Scheduler finished")
 	}
@@ -236,7 +234,7 @@ func main() {
 
 		var messages []string
 		var emailMessages []string
-
+		var teamsMessages []string
 		for _, domain := range domains {
 			expireDate, err := sslcert.CheckCertificate(domain.Value)
 			if err != nil {
@@ -244,18 +242,21 @@ func main() {
 				continue
 			}
 
-			expireMessage := fmt.Sprintf("Domain %s expires in %s", domain.Value, sslcert.FormatDuration(time.Until(expireDate)))
+			expireMessage := fmt.Sprintf("Domain %s expires in %s.  ", domain.Value, sslcert.FormatDuration(time.Until(expireDate)))
 			log.Println(expireMessage)
 			messages = append(messages, expireMessage)
 
 			if time.Until(expireDate) < 48*time.Hour {
-				emailMessage := fmt.Sprintf("The SSL certificate for %s will expire on %s.", domain.Value, expireDate.String())
+				emailMessage := fmt.Sprintf("The SSL certificate for %s will expire on %s.  ", domain.Value, expireDate.String())
 				emailMessages = append(emailMessages, emailMessage)
+				teamsMessages = append(teamsMessages, emailMessage)
 			}
 		}
 
-		teamsMessage := strings.Join(messages, "\n")
-		sslcert.SendTeamsNotification(teamsWebhookURL, teamsMessage)
+		if len(teamsMessages) > 0 {
+			teamsMessage := strings.Join(teamsMessages, "\n")
+			sslcert.SendTeamsNotification(teamsWebhookURL, teamsMessage, true)
+		}
 
 		decryptedPassword, err := decryptPassword(emailConfig.Pass)
 		if err != nil {

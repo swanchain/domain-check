@@ -44,11 +44,12 @@ type EmailConfig struct {
 }
 
 type TeamsMessage struct {
-	Type    string `json:"@type"`
-	Context string `json:"@context"`
-	Summary string `json:"summary"`
-	Title   string `json:"title"`
-	Text    string `json:"text"`
+	Type     string `json:"@type"`
+	Context  string `json:"@context"`
+	Summary  string `json:"summary"`
+	Title    string `json:"title"`
+	Text     string `json:"text"`
+	Markdown bool   `json:"markdown"`
 }
 
 func SetExplorerAndRpcVars(db *sqlx.DB) error {
@@ -241,13 +242,14 @@ func SendWalletBalanceEmail(emailConfig EmailConfig, recipient string, message s
 	log.Print("sent email to ", to)
 }
 
-func SendTeamsNotification(webhookURL string, message string) {
+func SendTeamsNotification(webhookURL string, message string, isMarkdown bool) {
 	msg := TeamsMessage{
-		Type:    "MessageCard",
-		Context: "http://schema.org/extensions",
-		Summary: "Wallet Balance Update",
-		Title:   "Wallet Balance Update",
-		Text:    message,
+		Type:     "MessageCard",
+		Context:  "http://schema.org/extensions",
+		Summary:  "SSL Certificate Expiration Warning",
+		Title:    "SSL Certificate Expiration Warning",
+		Text:     message,
+		Markdown: isMarkdown,
 	}
 
 	msgBytes, err := json.Marshal(msg)
