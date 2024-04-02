@@ -157,13 +157,12 @@ func main() {
 				continue
 			}
 
-			balanceChange, err := GetWalletBalanceChange(db, l1Wallet.Value)
+			balanceChange, err := wallet.GetWalletBalanceChange(db, l1Wallet.Value)
 			if err != nil {
 				log.Println(err)
 				continue
 			}
-
-			message := fmt.Sprintf("Wallet balance for %s is %f. Balance change: %f", l1Wallet.Value, balance, balanceChange)
+			message := fmt.Sprintf("Wallet balance for %s is %f. Balance change: %f\n", l1Wallet.Value, balance, balanceChange)
 			messages = append(messages, message)
 		}
 
@@ -180,7 +179,13 @@ func main() {
 				continue
 			}
 
-			message := fmt.Sprintf("The balance for wallet %s is now %f.  ", l2Wallet.Value, balance)
+			balanceChange, err := wallet.GetWalletBalanceChange(db, l2Wallet.Value)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			message := fmt.Sprintf("The balance for wallet %s is now %f. Balance change: %f\n", l2Wallet.Value, balance, balanceChange)
 			messages = append(messages, message)
 		}
 		emailBody := strings.Join(messages, "\n")
