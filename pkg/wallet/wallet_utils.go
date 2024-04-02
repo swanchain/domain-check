@@ -147,6 +147,15 @@ func CheckBalance(rpcURL, walletAddress string) (float64, error) {
 	return balance, nil
 }
 
+func GetWalletBalanceChange(db *sqlx.DB, walletAddress string) (float64, error) {
+	var balanceChange float64
+	err := db.Get(&balanceChange, "SELECT balance_change FROM wallets WHERE address = $1", walletAddress)
+	if err != nil {
+		return 0, err
+	}
+	return balanceChange, nil
+}
+
 func CheckSepoliaBalance(walletAddress string) (float64, error) {
 	balance, err := CheckBalance(sepolia_rpc, walletAddress)
 	if err != nil {

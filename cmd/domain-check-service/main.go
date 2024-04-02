@@ -156,7 +156,14 @@ func main() {
 				log.Println(err)
 				continue
 			}
-			message := fmt.Sprintf("The balance for wallet %s is now %f.  ", l1Wallet.Value, balance)
+
+			balanceChange, err := GetWalletBalanceChange(db, l1Wallet.Value)
+			if err != nil {
+				log.Println(err)
+				continue
+			}
+
+			message := fmt.Sprintf("Wallet balance for %s is %f. Balance change: %f", l1Wallet.Value, balance, balanceChange)
 			messages = append(messages, message)
 		}
 
