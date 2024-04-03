@@ -114,18 +114,6 @@ func main() {
 			log.Println(err)
 			return
 		}
-		/*
-			emailConfigMap, err := getEmailConfig(db)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-
-			emailConfig := wallet.EmailConfig{
-				User: emailConfigMap["admin-email"],
-				Pass: emailConfigMap["admin-email-psw"],
-			}
-		*/
 
 		emailConfig := wallet.EmailConfig{
 			User: os.Getenv("ADMIN_EMAIL"),
@@ -189,12 +177,10 @@ func main() {
 			messages = append(messages, message)
 		}
 		emailBody := strings.Join(messages, "\n")
-		//decryptedPassword, err := decryptPassword(emailConfig.Pass)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		//emailConfig.Pass = decryptedPassword
 		for _, recipient := range recipients {
 			wallet.SendWalletBalanceEmail(emailConfig, recipient.Value, emailBody)
 			log.Printf("Sent email to %s", recipient.Value)
@@ -220,18 +206,7 @@ func main() {
 			return
 		}
 		log.Printf("Got %d recipients", len(recipients))
-		/*
-			emailConfigMap, err := getEmailConfig(db)
-			if err != nil {
-				log.Println(err)
-				return
-			}
 
-			emailConfig := sslcert.EmailConfig{
-				User: emailConfigMap["admin-email"],
-				Pass: emailConfigMap["admin-email-psw"],
-			}
-		*/
 		emailConfig := sslcert.EmailConfig{
 			User: os.Getenv("ADMIN_EMAIL"),
 			Pass: os.Getenv("ADMIN_PW"),
@@ -267,12 +242,8 @@ func main() {
 		if len(teamsMessages) > 0 {
 			teamsMessage := strings.Join(teamsMessages, "")
 			sslcert.SendTeamsNotification(teamsWebhookURL, teamsMessage, true)
-		}
-
-		//decryptedPassword, err := decryptPassword(emailConfig.Pass)
-		if err != nil {
-			log.Println(err)
-			return
+		} else {
+			log.Println("No SSL certificates expiring in under 48 hours. No Teams notification sent.")
 		}
 
 		if len(emailMessages) > 0 {
@@ -281,14 +252,16 @@ func main() {
 				sslcert.SendEmail(emailConfig, recipient.Value, emailBody)
 				log.Printf("Sent email to %s", recipient.Value)
 			}
+		} else {
+			log.Println("No SSL certificates expiring in under 48 hours. No emails sent.")
 		}
-		//emailConfig.Pass = decryptedPassword
+
 		log.Println("SSL Scheduler finished")
 	}
 
 	c := cron.New()
-	c.AddFunc("30 9 * * *", walletTask)
-	c.AddFunc("30 9 * * *", SSLtask)
+	c.AddFunc("0 30 9 * * *", walletTask)
+	c.AddFunc("0 30 9 * * *", SSLtask)
 	c.Start()
 
 	select {}

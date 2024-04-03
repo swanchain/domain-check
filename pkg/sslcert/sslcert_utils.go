@@ -80,13 +80,50 @@ func SendEmail(emailConfig EmailConfig, recipient string, message string) {
 		"Subject: SSL Certificate Expiration Warning\n\n" +
 		message
 
-	err := smtp.SendMail("smtp.office365.com:587",
-		smtp.PlainAuth("", from, pass, "smtp.office365.com"),
-		from, []string{to}, []byte(msg))
+	auth := smtp.PlainAuth("", from, pass, "smtp.office365.com")
 
+	tlsconfig := &tls.Config{
+		InsecureSkipVerify: true,
+		ServerName:         "smtp.office365.com",
+	}
+
+	conn, err := tls.Dial("tcp", "smtp.office365.com:587", tlsconfig)
 	if err != nil {
-		log.Printf("smtp error: %s", err)
-		return
+		log.Panic(err)
+	}
+
+	c, err := smtp.NewClient(conn, "smtp.office365.com")
+	if err != nil {
+		log.Panic(err)
+	}
+
+	if err = c.Auth(auth); err != nil {
+		log.Panic(err)
+	}
+
+	if err = c.Mail(from); err != nil {
+		log.Panic(err)
+	}
+	if err = c.Rcpt(to); err != nil {
+		log.Panic(err)
+	}
+
+	wc, err := c.Data()
+	if err != nil {
+		log.Panic(err)
+	}
+	_, err = wc.Write([]byte(msg))
+	if err != nil {
+		log.Panic(err)
+	}
+	err = wc.Close()
+	if err != nil {
+		log.Panic(err)
+	}
+
+	err = c.Quit()
+	if err != nil {
+		log.Panic(err)
 	}
 
 	log.Print("sent email to ", to)
