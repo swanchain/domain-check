@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/smtp"
 	"net/url"
@@ -33,6 +35,32 @@ type TeamsMessage struct {
 	Title    string `json:"title"`
 	Text     string `json:"text"`
 	Markdown bool   `json:"markdown"`
+}
+
+type loginAuth struct {
+	username, password string
+}
+
+func LoginAuth(username, password string) smtp.Auth {
+	return &loginAuth{username, password}
+}
+
+func (a *loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	return "LOGIN", []byte(a.username), nil
+}
+
+func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
+	if more {
+		switch string(fromServer) {
+		case "Username:":
+			return []byte(a.username), nil
+		case "Password:":
+			return []byte(a.password), nil
+		default:
+			return nil, errors.New("Unknown from server")
+		}
+	}
+	return nil, nil
 }
 
 func GetDomains(db *sqlx.DB) ([]model.Info, error) {
@@ -69,7 +97,6 @@ func FormatDuration(d time.Duration) string {
 
 	return fmt.Sprintf("%d days %d hours %d minutes", days, h, min)
 }
-
 func SendEmail(emailConfig EmailConfig, recipient string, message string) {
 	from := emailConfig.User
 	pass := emailConfig.Pass
@@ -80,14 +107,10 @@ func SendEmail(emailConfig EmailConfig, recipient string, message string) {
 		"Subject: SSL Certificate Expiration Warning\n\n" +
 		message
 
-	auth := smtp.PlainAuth("", from, pass, "smtp.office365.com")
-
 	tlsconfig := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         "smtp.office365.com",
+		ServerName: "smtp.office365.com",
 	}
-
-	conn, err := tls.Dial("tcp", "smtp.office365.com:587", tlsconfig)
+	conn, err := net.Dial("tcp", "smtp.office365.com:587")
 	if err != nil {
 		log.Panic(err)
 	}
@@ -97,6 +120,11 @@ func SendEmail(emailConfig EmailConfig, recipient string, message string) {
 		log.Panic(err)
 	}
 
+	if err = c.StartTLS(tlsconfig); err != nil {
+		log.Panic(err)
+	}
+
+	auth := LoginAuth(from, pass)
 	if err = c.Auth(auth); err != nil {
 		log.Panic(err)
 	}

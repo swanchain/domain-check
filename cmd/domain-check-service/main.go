@@ -258,7 +258,6 @@ func main() {
 
 		log.Println("SSL Scheduler finished")
 	}
-
 	c := cron.New()
 	c.AddFunc("0 30 9 * * *", walletTask)
 	c.AddFunc("0 30 9 * * *", SSLtask)
