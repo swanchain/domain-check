@@ -82,20 +82,14 @@ func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
 }
 
 func SetExplorerAndRpcVars(db *sqlx.DB) error {
-	rows, err := db.Queryx("SELECT key, value FROM info WHERE key IN ('sepolia-rpc', 'saturn-rpc', 'saturn-block-explorer', 'sepolia-block-explorer')")
+	var configs []model.Info
+	err := db.Select(&configs, "SELECT key, value FROM info WHERE key IN ('sepolia-rpc', 'saturn-rpc', 'saturn-block-explorer', 'sepolia-block-explorer')")
 	if err != nil {
 		log.Printf("Error executing query in SetExplorerAndRpcVars: %s", err)
 		return err
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var config model.Config
-		if err := rows.StructScan(&config); err != nil {
-			log.Printf("Error scanning row in SetExplorerAndRpcVars: %s", err)
-			return err
-		}
-
+	for _, config := range configs {
 		switch config.Key {
 		case "sepolia-rpc":
 			sepolia_rpc = config.Value
@@ -108,15 +102,10 @@ func SetExplorerAndRpcVars(db *sqlx.DB) error {
 		}
 	}
 
-	if err := rows.Err(); err != nil {
-		log.Printf("Error after iterating rows in SetExplorerAndRpcVars: %s", err)
-		return err
-	}
-
 	return nil
 }
-func GetL1Wallet(db *sqlx.DB) ([]model.Config, error) {
-	var wallets []model.Config
+func GetL1Wallet(db *sqlx.DB) ([]model.Info, error) {
+	var wallets []model.Info
 	err := db.Select(&wallets, "SELECT * FROM info WHERE key ILIKE 'l1%' AND type = 'wallet-address'")
 	if err != nil {
 		log.Printf("Error retrieving L1 wallets: %s", err)
@@ -126,8 +115,8 @@ func GetL1Wallet(db *sqlx.DB) ([]model.Config, error) {
 	return wallets, nil
 }
 
-func GetL2Wallet(db *sqlx.DB) ([]model.Config, error) {
-	var wallets []model.Config
+func GetL2Wallet(db *sqlx.DB) ([]model.Info, error) {
+	var wallets []model.Info
 	err := db.Select(&wallets, "SELECT * FROM info WHERE key ILIKE 'l2%' AND type = 'wallet-address'")
 	if err != nil {
 		log.Printf("Error retrieving L2 wallets: %s", err)
@@ -205,7 +194,7 @@ func CheckSwanBalance(walletAddress string) (float64, error) {
 	return balance, nil
 }
 
-func UpsertWallet(db *sqlx.DB, wallet model.Config, newBalance float64, networkEnv string) error {
+func UpsertWallet(db *sqlx.DB, wallet model.Info, newBalance float64, networkEnv string) error {
 	var currentBalanceStr string
 	err := db.Get(&currentBalanceStr, "SELECT balance FROM swan_chain_data WHERE wallet_address = $1 AND network_env = $2", wallet.Value, networkEnv)
 
@@ -250,16 +239,16 @@ func UpsertWallet(db *sqlx.DB, wallet model.Config, newBalance float64, networkE
 	return nil
 }
 
-func UpdateL1Wallet(db *sqlx.DB, wallet model.Config, newBalance float64) error {
+func UpdateL1Wallet(db *sqlx.DB, wallet model.Info, newBalance float64) error {
 	return UpsertWallet(db, wallet, newBalance, "sepolia")
 }
 
-func UpdateL2Wallet(db *sqlx.DB, wallet model.Config, newBalance float64) error {
+func UpdateL2Wallet(db *sqlx.DB, wallet model.Info, newBalance float64) error {
 	return UpsertWallet(db, wallet, newBalance, "swan")
 }
 
 // https://stackoverflow.com/questions/58804817/setting-up-standard-go-net-smtp-with-office-365-fails-with-error-tls-first-rec
-func SendWalletBalanceEmail(emailConfig EmailConfig, recipient string, message string) {
+func SendWalletBalanceEmail(emailConfig EmailConfig, recipient string, message string) error {
 	from := emailConfig.User
 	pass := emailConfig.Pass
 	to := recipient
@@ -274,76 +263,77 @@ func SendWalletBalanceEmail(emailConfig EmailConfig, recipient string, message s
 	}
 	conn, err := net.Dial("tcp", "smtp.office365.com:587")
 	if err != nil {
-		log.Panic(err)
+		return fmt.Errorf("net dial error: %s", err)
 	}
 
 	c, err := smtp.NewClient(conn, "smtp.office365.com")
 	if err != nil {
-		log.Panic(err)
+		return fmt.Errorf("smtp new client error: %s", err)
 	}
 
 	if err = c.StartTLS(tlsconfig); err != nil {
-		log.Panic(err)
+		return fmt.Errorf("start tls error: %s", err)
 	}
 
 	auth := LoginAuth(from, pass)
 	if err = c.Auth(auth); err != nil {
-		log.Panic(err)
+		return fmt.Errorf("auth error: %s", err)
 	}
 
 	if err = c.Mail(from); err != nil {
-		log.Panic(err)
+		return fmt.Errorf("mail error: %s", err)
 	}
 	if err = c.Rcpt(to); err != nil {
-		log.Panic(err)
+		return fmt.Errorf("rcpt error: %s", err)
 	}
 
 	wc, err := c.Data()
 	if err != nil {
-		log.Panic(err)
+		return fmt.Errorf("data error: %s", err)
 	}
 	_, err = wc.Write([]byte(msg))
 	if err != nil {
-		log.Panic(err)
+		return fmt.Errorf("write error: %s", err)
 	}
 	err = wc.Close()
 	if err != nil {
-		log.Panic(err)
+		return fmt.Errorf("close error: %s", err)
 	}
 
 	err = c.Quit()
 	if err != nil {
-		log.Panic(err)
+		return fmt.Errorf("quit error: %s", err)
 	}
 
 	log.Print("sent email to ", to)
+	return nil
 }
 
-func SendTeamsNotification(webhookURL string, message string, isMarkdown bool) {
+func SendTeamsNotification(webhookURL string, message string, isMarkdown bool) error {
 	msg := TeamsMessage{
 		Type:     "MessageCard",
 		Context:  "http://schema.org/extensions",
-		Summary:  "SSL Certificate Expiration Warning",
-		Title:    "SSL Certificate Expiration Warning",
+		Summary:  "Wallet Balance Change Update",
+		Title:    "Wallet Balance Change Update",
 		Text:     message,
 		Markdown: isMarkdown,
 	}
 
 	msgBytes, err := json.Marshal(msg)
 	if err != nil {
-		log.Printf("json marshal error: %s", err)
-		return
+		return fmt.Errorf("json marshal error: %s", err)
 	}
 
 	resp, err := http.Post(webhookURL, "application/json", bytes.NewBuffer(msgBytes))
 	if err != nil {
-		log.Printf("http post error: %s", err)
-		return
+		return fmt.Errorf("http post error: %s", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := ioutil.ReadAll(resp.Body)
-		log.Printf("teams webhook error: %s", bodyBytes)
+		return fmt.Errorf("teams webhook error: %s", bodyBytes)
 	}
+
+	return nil
 }

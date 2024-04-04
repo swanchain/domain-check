@@ -94,6 +94,7 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
+
 	walletTask := func() {
 		log.Println("Wallet Scheduler started")
 		var messages []string
@@ -150,7 +151,7 @@ func main() {
 				log.Println(err)
 				continue
 			}
-			message := fmt.Sprintf("Wallet balance for %s is %f. Balance change: %f\n", l1Wallet.Value, balance, balanceChange)
+			message := fmt.Sprintf("Wallet balance for %s is %f.\nBalance change: %f\n", l1Wallet.Value, balance, balanceChange)
 			messages = append(messages, message)
 		}
 
@@ -173,19 +174,27 @@ func main() {
 				continue
 			}
 
-			message := fmt.Sprintf("The balance for wallet %s is now %f. Balance change: %f\n", l2Wallet.Value, balance, balanceChange)
+			message := fmt.Sprintf("The balance for wallet %s is now %f.\nBalance change: %f\n", l2Wallet.Value, balance, balanceChange)
 			messages = append(messages, message)
 		}
-		emailBody := strings.Join(messages, "\n")
+
+		teamsMessage := strings.Join(messages, "\n")
+		err = wallet.SendTeamsNotification(teamsWebhookURL, teamsMessage, true)
 		if err != nil {
-			log.Println(err)
-			return
+			log.Printf("Error sending Teams notification: %v", err)
+		} else {
+			log.Println("Teams notification sent.")
 		}
+
+		emailBody := strings.Join(messages, "\n")
 		for _, recipient := range recipients {
-			wallet.SendWalletBalanceEmail(emailConfig, recipient.Value, emailBody)
+			err := wallet.SendWalletBalanceEmail(emailConfig, recipient.Value, emailBody)
+			if err != nil {
+				log.Printf("Error sending email to %s: %v", recipient.Value, err)
+				continue
+			}
 			log.Printf("Sent email to %s", recipient.Value)
 		}
-		wallet.SendTeamsNotification(teamsWebhookURL, emailBody, true)
 
 		log.Println("Wallet Scheduler finished")
 	}
@@ -231,20 +240,17 @@ func main() {
 			expireMessage := fmt.Sprintf("%s expires in %s.\n", domain.Value, sslcert.FormatDuration(time.Until(expireDate)))
 			log.Println(expireMessage)
 			messages = append(messages, expireMessage)
+			teamsMessages = append(teamsMessages, expireMessage)
 
 			if time.Until(expireDate) < 48*time.Hour {
 				emailMessage := fmt.Sprintf("The SSL certificate for %s will expire on %s.\n", domain.Value, expireDate.String())
 				emailMessages = append(emailMessages, emailMessage)
-				teamsMessages = append(teamsMessages, emailMessage)
 			}
 		}
 
-		if len(teamsMessages) > 0 {
-			teamsMessage := strings.Join(teamsMessages, "")
-			sslcert.SendTeamsNotification(teamsWebhookURL, teamsMessage, true)
-		} else {
-			log.Println("No SSL certificates expiring in under 48 hours. No Teams notification sent.")
-		}
+		teamsMessage := strings.Join(teamsMessages, "")
+		sslcert.SendTeamsNotification(teamsWebhookURL, teamsMessage, true)
+		log.Println("Teams notification sent.")
 
 		if len(emailMessages) > 0 {
 			emailBody := strings.Join(emailMessages, "")
@@ -258,7 +264,12 @@ func main() {
 
 		log.Println("SSL Scheduler finished")
 	}
-	c := cron.New()
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	c := cron.NewWithLocation(loc)
 	c.AddFunc("0 30 9 * * *", walletTask)
 	c.AddFunc("0 30 9 * * *", SSLtask)
 	c.Start()
