@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
 	"github.com/robfig/cron"
+	"github.com/swanchain/domain-check/pkg/chainstatus"
 	"github.com/swanchain/domain-check/pkg/database"
 	"github.com/swanchain/domain-check/pkg/model"
 	"github.com/swanchain/domain-check/pkg/sslcert"
@@ -94,7 +95,10 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-
+	err = wallet.SetExplorerAndRpcVars(db)
+	if err != nil {
+		log.Fatalln(err)
+	}
 	walletTask := func() {
 		log.Println("Wallet Scheduler started")
 		var messages []string
@@ -263,14 +267,37 @@ func main() {
 
 		log.Println("SSL Scheduler finished")
 	}
+
+	chainStatusTask := func() {
+		swan_rpc := wallet.GetSwanRPC()
+		if chainstatus.CheckChainStatus(swan_rpc) {
+			log.Println("Less than 5 transactions in the last 10 blocks.")
+			teamsWebhookURL, err := getTeamsWebhookURL(db)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			chainstatus.SendTeamsNotification(teamsWebhookURL, "There are less than 5 transactions in the last 10 blocks.", true)
+		}
+	}
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		log.Fatal(err)
 	}
 	c := cron.NewWithLocation(loc)
-	c.AddFunc("0 30 9 * * *", walletTask)
-	c.AddFunc("0 30 9 * * *", SSLtask)
+	c.AddFunc("30 9 * * *", walletTask)
+	c.AddFunc("30 9 * * *", SSLtask)
 	c.Start()
 
+	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				chainStatusTask()
+			}
+		}
+	}()
 	select {}
 }
