@@ -13,7 +13,6 @@ import (
 	"github.com/swanchain/domain-check/pkg/chainstatus"
 	"github.com/swanchain/domain-check/pkg/database"
 	"github.com/swanchain/domain-check/pkg/model"
-	"github.com/swanchain/domain-check/pkg/sslcert"
 	"github.com/swanchain/domain-check/pkg/wallet"
 )
 
@@ -202,72 +201,73 @@ func main() {
 
 		log.Println("Wallet Scheduler finished")
 	}
-	SSLtask := func() {
-		log.Println("SSL Scheduler started")
+	/*
+		SSLtask := func() {
+			log.Println("SSL Scheduler started")
 
-		domains, err := sslcert.GetDomains(db)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		log.Printf("Got %d domains", len(domains))
-
-		recipients, err := getRecipients(db)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		log.Printf("Got %d recipients", len(recipients))
-
-		emailConfig := sslcert.EmailConfig{
-			User: os.Getenv("ADMIN_EMAIL"),
-			Pass: os.Getenv("ADMIN_PW"),
-		}
-
-		teamsWebhookURL, err := getTeamsWebhookURL(db)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
-		var emailMessages []string
-		var teamsMessages []string
-		for _, domain := range domains {
-			expireDate, err := sslcert.CheckCertificate(domain.Value)
+			domains, err := sslcert.GetDomains(db)
 			if err != nil {
 				log.Println(err)
-				continue
+				return
+			}
+			log.Printf("Got %d domains", len(domains))
+
+			recipients, err := getRecipients(db)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			log.Printf("Got %d recipients", len(recipients))
+
+			emailConfig := sslcert.EmailConfig{
+				User: os.Getenv("ADMIN_EMAIL"),
+				Pass: os.Getenv("ADMIN_PW"),
 			}
 
-			if time.Until(expireDate) < 48*time.Hour {
-				expireMessage := fmt.Sprintf("The SSL certificate for %s will expire on %s.\n", domain.Value, expireDate.String())
-				log.Println(expireMessage)
-				emailMessages = append(emailMessages, expireMessage)
-				teamsMessages = append(teamsMessages, expireMessage)
+			teamsWebhookURL, err := getTeamsWebhookURL(db)
+			if err != nil {
+				log.Println(err)
+				return
 			}
-		}
 
-		if len(teamsMessages) > 0 {
-			teamsMessage := strings.Join(teamsMessages, "")
-			sslcert.SendTeamsNotification(teamsWebhookURL, teamsMessage, true)
-			log.Println("Teams notification sent.")
-		} else {
-			log.Println("No SSL certificates expiring in under 48 hours. No Teams notification sent.")
-		}
+			var emailMessages []string
+			var teamsMessages []string
+			for _, domain := range domains {
+				expireDate, err := sslcert.CheckCertificate(domain.Value)
+				if err != nil {
+					log.Println(err)
+					continue
+				}
 
-		if len(emailMessages) > 0 {
-			emailBody := strings.Join(emailMessages, "")
-			for _, recipient := range recipients {
-				sslcert.SendEmail(emailConfig, recipient.Value, emailBody)
-				log.Printf("Sent email to %s", recipient.Value)
+				if time.Until(expireDate) < 48*time.Hour {
+					expireMessage := fmt.Sprintf("The SSL certificate for %s will expire on %s.\n", domain.Value, expireDate.String())
+					log.Println(expireMessage)
+					emailMessages = append(emailMessages, expireMessage)
+					teamsMessages = append(teamsMessages, expireMessage)
+				}
 			}
-		} else {
-			log.Println("No SSL certificates expiring in under 48 hours. No emails sent.")
+
+			if len(teamsMessages) > 0 {
+				teamsMessage := strings.Join(teamsMessages, "")
+				sslcert.SendTeamsNotification(teamsWebhookURL, teamsMessage, true)
+				log.Println("Teams notification sent.")
+			} else {
+				log.Println("No SSL certificates expiring in under 48 hours. No Teams notification sent.")
+			}
+
+			if len(emailMessages) > 0 {
+				emailBody := strings.Join(emailMessages, "")
+				for _, recipient := range recipients {
+					sslcert.SendEmail(emailConfig, recipient.Value, emailBody)
+					log.Printf("Sent email to %s", recipient.Value)
+				}
+			} else {
+				log.Println("No SSL certificates expiring in under 48 hours. No emails sent.")
+			}
+
+			log.Println("SSL Scheduler finished")
 		}
-
-		log.Println("SSL Scheduler finished")
-	}
-
+	*/
 	chainStatusTask := func() {
 		swan_rpc := wallet.GetSwanRPC()
 		status, err := chainstatus.CheckChainStatus(swan_rpc)
@@ -301,7 +301,7 @@ func main() {
 	c.AddFunc("0 30 9 * * *", walletTask)
 	//c.AddFunc("0 30 9 * * *", SSLtask)
 	c.Start()
-
+	//lint:ignore ST1000 reason: using a ticker, so for { select {} } is appropriate here
 	go func() {
 		ticker := time.NewTicker(20 * time.Second)
 		defer ticker.Stop()
