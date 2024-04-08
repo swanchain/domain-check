@@ -270,16 +270,29 @@ func main() {
 
 	chainStatusTask := func() {
 		swan_rpc := wallet.GetSwanRPC()
-		if chainstatus.CheckChainStatus(swan_rpc) {
+		status, err := chainstatus.CheckChainStatus(swan_rpc)
+		if err != nil {
+			log.Println(err)
+			teamsWebhookURL, err := getTeamsWebhookURL(db)
+			if err != nil {
+				log.Println(err)
+				return
+			}
+			chainstatus.SendTeamsNotification(teamsWebhookURL, err.Error(), true)
+			return
+		}
+
+		if status != "healthy" {
 			log.Println("Less than 5 transactions in the last 10 blocks.")
 			teamsWebhookURL, err := getTeamsWebhookURL(db)
 			if err != nil {
 				log.Println(err)
 				return
 			}
-			chainstatus.SendTeamsNotification(teamsWebhookURL, "There are less than 5 transactions in the last 10 blocks.", true)
+			chainstatus.SendTeamsNotification(teamsWebhookURL, "Less than 5 transactions in the last 10 blocks.", true)
 		}
 	}
+
 	loc, err := time.LoadLocation("America/New_York")
 	if err != nil {
 		log.Fatal(err)

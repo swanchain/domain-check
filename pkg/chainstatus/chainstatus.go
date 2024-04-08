@@ -3,6 +3,7 @@ package chainstatus
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -19,13 +20,13 @@ type TeamsMessage struct {
 	Markdown bool   `json:"markdown"`
 }
 
-func CheckChainStatus(swan_rpc string) bool {
+func CheckChainStatus(swan_rpc string) (string, error) {
 	log.Printf("Connecting to Swan Chain node at: %s", swan_rpc)
 	client := ethrpc.New(swan_rpc)
 
 	blockNumber, err := client.EthBlockNumber()
 	if err != nil {
-		log.Fatalf("Failed to get the latest block number: %v", err)
+		return "", fmt.Errorf("failed to get the latest block number: %v", err)
 	}
 
 	startBlock := blockNumber - 10
@@ -37,7 +38,7 @@ func CheckChainStatus(swan_rpc string) bool {
 	for i := startBlock; i <= blockNumber; i++ {
 		block, err := client.EthGetBlockByNumber(i, true)
 		if err != nil {
-			log.Fatalf("Failed to get block %d: %v", i, err)
+			return "", fmt.Errorf("failed to get block %d: %v", i, err)
 		}
 
 		totalTransactions += len(block.Transactions)
@@ -46,7 +47,11 @@ func CheckChainStatus(swan_rpc string) bool {
 
 	log.Printf("Total transactions in the last 10 blocks: %d", totalTransactions)
 
-	return totalTransactions < 5
+	if totalTransactions >= 5 {
+		return "healthy", nil
+	}
+
+	return "", fmt.Errorf("less than 5 transactions in the last 10 blocks")
 }
 
 func SendTeamsNotification(webhookURL string, message string, isMarkdown bool) {
