@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"math"
 	"math/big"
@@ -22,10 +22,10 @@ import (
 )
 
 var (
-	sepolia_rpc            string
-	swan_rpc               string
-	swan_block_explorer    string
-	sepolia_block_explorer string
+	sepolia_rpc string
+	swan_rpc    string
+	//swan_block_explorer    string
+	//sepolia_block_explorer string
 )
 
 type rpcRequest struct {
@@ -59,6 +59,10 @@ type loginAuth struct {
 	username, password string
 }
 
+func GetSwanRPC() string {
+	return swan_rpc
+}
+
 func LoginAuth(username, password string) smtp.Auth {
 	return &loginAuth{username, password}
 }
@@ -75,7 +79,7 @@ func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
 		case "Password:":
 			return []byte(a.password), nil
 		default:
-			return nil, errors.New("Unknown from server")
+			return nil, errors.New("unknown from server")
 		}
 	}
 	return nil, nil
@@ -83,7 +87,22 @@ func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
 
 func SetExplorerAndRpcVars(db *sqlx.DB) error {
 	var configs []model.Info
-	err := db.Select(&configs, "SELECT key, value FROM info WHERE key IN ('sepolia-rpc', 'saturn-rpc', 'saturn-block-explorer', 'sepolia-block-explorer')")
+	rows, err := db.Query(`SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname != 'pg_catalog' AND schemaname != 'information_schema';`)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer rows.Close()
+
+	log.Println("Tables:")
+	for rows.Next() {
+		var tableName string
+		if err := rows.Scan(&tableName); err != nil {
+			log.Fatalln(err)
+		}
+		log.Println(tableName)
+	}
+
+	err = db.Select(&configs, "SELECT key, value FROM info WHERE key IN ('sepolia-rpc', 'saturn-rpc', 'saturn-block-explorer', 'sepolia-block-explorer')")
 	if err != nil {
 		log.Printf("Error executing query in SetExplorerAndRpcVars: %s", err)
 		return err
@@ -95,15 +114,16 @@ func SetExplorerAndRpcVars(db *sqlx.DB) error {
 			sepolia_rpc = config.Value
 		case "saturn-rpc":
 			swan_rpc = config.Value
-		case "saturn-block-explorer":
-			swan_block_explorer = config.Value
-		case "sepolia-block-explorer":
-			sepolia_block_explorer = config.Value
+			//case "saturn-block-explorer":
+			//	swan_block_explorer = config.Value
+			//case "sepolia-block-explorer":
+			//	sepolia_block_explorer = config.Value
 		}
 	}
 
 	return nil
 }
+
 func GetL1Wallet(db *sqlx.DB) ([]model.Info, error) {
 	var wallets []model.Info
 	err := db.Select(&wallets, "SELECT * FROM info WHERE key ILIKE 'l1%' AND type = 'wallet-address'")
@@ -144,7 +164,7 @@ func CheckBalance(rpcURL, walletAddress string) (float64, error) {
 	}
 	defer resp.Body.Close()
 
-	respBytes, err := ioutil.ReadAll(resp.Body)
+	respBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return 0, err
 	}
@@ -331,7 +351,7 @@ func SendTeamsNotification(webhookURL string, message string, isMarkdown bool) e
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("teams webhook error: %s", bodyBytes)
 	}
 

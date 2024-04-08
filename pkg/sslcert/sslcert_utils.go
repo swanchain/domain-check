@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -57,7 +57,7 @@ func (a *loginAuth) Next(fromServer []byte, more bool) ([]byte, error) {
 		case "Password:":
 			return []byte(a.password), nil
 		default:
-			return nil, errors.New("Unknown from server")
+			return nil, errors.New("unknown from server")
 		}
 	}
 	return nil, nil
@@ -181,7 +181,7 @@ func SendTeamsNotification(webhookURL string, message string, isMarkdown bool) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		bodyBytes, _ := ioutil.ReadAll(resp.Body)
+		bodyBytes, _ := io.ReadAll(resp.Body)
 		log.Printf("teams webhook error: %s", bodyBytes)
 	}
 }
