@@ -286,7 +286,7 @@ func main() {
 	}
 	c := cron.NewWithLocation(loc)
 	c.AddFunc("30 9 * * *", walletTask)
-	c.AddFunc("30 9 * * *", SSLtask)
+	//c.AddFunc("30 9 * * *", SSLtask)
 	c.Start()
 
 	go func() {
